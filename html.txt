@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Streams</title>
+    <style>
+        .container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-around;
+            align-items: flex-start;
+            gap: 20px;
+        }
+        .stream {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        img {
+            border: 2px solid black;
+            width: 512px;
+            height: 512px;
+            object-fit: cover;
+            background-color: black;
+        }
+        .label {
+            margin-top: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .text-input {
+            margin-top: 20px;
+            text-align: center;
+        }
+        input {
+            padding: 5px;
+            width: 300px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="stream">
+            <img src="/video_feed?frame_type=latest" type="multipart/x-mixed-replace">
+            <div class="label">Agent view</div>
+        </div>
+        <div class="stream">
+            <img src="/video_feed?frame_type=wrist" type="multipart/x-mixed-replace">
+            <div class="label">Wrist view</div>
+        </div>
+    </div>
+    <div class="text-input">
+        <input type="text" id="instructionInput" placeholder="Send instruction">
+    </div>
+    <script>
+        document.getElementById("instructionInput").addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                const instruction = this.value;
+                fetch('/update_instruction', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ instruction: instruction })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log("Instruction sent:", data);
+                    // Clear the input field after sending
+                    this.value = "";
+                })
+                .catch(error => {
+                    console.error("Error sending instruction:", error);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
