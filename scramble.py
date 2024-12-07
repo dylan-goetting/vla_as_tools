@@ -26,15 +26,15 @@ data = {}
 
 tasks = json.load(open("tasks.json"))
 for task, lst in tasks.items():
-    data[task] = []
+    data[task] = {}
     for instruction in lst[0:30]:
         try:
-            dct = {instruction: []}
+            lst = []
             result = agent.call(images=[], text_prompt=make_icl_prompt(instruction))
             d = ast.literal_eval(result[result.rindex('{'):result.rindex('}') + 1])
             for k, v in d.items():
-                dct[instruction].append(v)
-            data[task].append(dct)
+                lst.append(v)
+            data[task][instruction] = lst
             # print(result)
         except Exception as e:
             print(f"Error: {e}")

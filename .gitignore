@@ -4,3 +4,4 @@ experiments/
 vlagent.py
 render.py
 __pycache__
+rollouts/

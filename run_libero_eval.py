@@ -16,7 +16,7 @@ Usage:
         --wandb_project <PROJECT> \
         --wandb_entity <ENTITY>
 """
-
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -70,7 +70,7 @@ class GenerateConfig:
     #################################################################################################################
     task_suite_name: str = "libero_spatial"          # Task suite. Options: libero_spatial, libero_object, libero_goal, libero_10, libero_90
     num_steps_wait: int = 10                         # Number of steps to wait for objects to stabilize in sim
-    num_trials_per_task: int = 50                    # Number of rollouts per task
+    num_trials_per_task: int = 4                    # Number of rollouts per task
 
     #################################################################################################################
     # Utils
@@ -89,6 +89,8 @@ class GenerateConfig:
 
 @draccus.wrap()
 def eval_libero(cfg: GenerateConfig) -> None:
+    run_data = []
+    rephrased = json.load(open("r1.json"))
     assert cfg.pretrained_checkpoint is not None, "cfg.pretrained_checkpoint must not be None!"
     if "image_aug" in cfg.pretrained_checkpoint:
         assert cfg.center_crop, "Expecting `center_crop==True` because model was trained with image augmentations!"
@@ -157,10 +159,18 @@ def eval_libero(cfg: GenerateConfig) -> None:
 
         # Start episodes
         task_episodes, task_successes = 0, 0
-        for episode_idx in tqdm.tqdm(range(cfg.num_trials_per_task)):
+        for episode_idx in tqdm.tqdm(range(cfg.num_trials_per_task + 1)):
             print(f"\nTask: {task_description}")
-            log_file.write(f"\nTask: {task_description}\n")
-
+            if episode_idx == 0:
+                rephrased_instruction = task_description
+            else:
+                rephrased_instruction = rephrased[cfg.task_suite_name][task_description][episode_idx-1]
+            log_file.write(f"\nTask: {task_description}\n --> {rephrased_instruction}\n")
+            run_data.append({
+                "task_description": task_description,
+                "rephrased_instruction": rephrased_instruction,
+                "success": False,
+            })
             # Reset environment
             env.reset()
 
@@ -212,7 +222,7 @@ def eval_libero(cfg: GenerateConfig) -> None:
                         cfg,
                         model,
                         observation,
-                        task_description,
+                        rephrased_instruction,
                         processor=processor,
                     )
 
@@ -226,7 +236,8 @@ def eval_libero(cfg: GenerateConfig) -> None:
 
                     # Execute action in environment
                     obs, reward, done, info = env.step(action.tolist())
-                    if done:
+                    if done:          
+                        run_data[-1]['success'] = True                                                                            
                         task_successes += 1
                         total_successes += 1
                         break
@@ -241,9 +252,9 @@ def eval_libero(cfg: GenerateConfig) -> None:
             total_episodes += 1
 
             # Save a replay video of the episode
-            save_rollout_video(
-                replay_images, total_episodes, success=done, task_description=task_description, log_file=log_file
-            )
+            # save_rollout_video(
+            #     replay_images, total_episodes, success=done, task_description=task_description, log_file=log_file
+            # )
 
             # Log current results
             print(f"Success: {done}")
@@ -253,6 +264,11 @@ def eval_libero(cfg: GenerateConfig) -> None:
             log_file.write(f"# episodes completed so far: {total_episodes}\n")
             log_file.write(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)\n")
             log_file.flush()
+            # Save run data
+            with open(f'{cfg.task_suite_name}_reprhase1.json', 'w') as f:
+                log_file.write(f"Saving run data: {run_data}\n")
+                json.dump(run_data, f)
+
 
         # Log final results
         print(f"Current task success rate: {float(task_successes) / float(task_episodes)}")
