@@ -179,36 +179,3 @@ class GeminiVLM(VLM):
         Retrieve the total spend on model usage.
         """
         return self.spend
-
-
-class DepthEstimator:
-    """
-    A class for depth estimation from images using a pre-trained model.
-    """
-
-    def __init__(self):
-        """
-        Initialize the depth estimation pipeline with the appropriate model.
-        """
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        checkpoint = "Intel/zoedepth-kitti"
-        self.pipe = pipeline("depth-estimation", model=checkpoint, device=device)
-
-    def call(self, image: np.array):
-        """
-        Perform depth estimation on an image.
-
-        Parameters
-        ----------
-        image : np.array
-            An RGB image for depth estimation.
-        """
-        original_shape = image.shape
-        image_rgb = Image.fromarray(image[:, :, :3])
-        depth_predictions = self.pipe(image_rgb)['predicted_depth']
-
-        # Resize the depth map back to the original image dimensions
-        depth_predictions = depth_predictions.squeeze().cpu().numpy()
-        depth_predictions = cv2.resize(depth_predictions, (original_shape[1], original_shape[0]))
-
-        return depth_predictions

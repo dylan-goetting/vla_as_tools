@@ -3,3 +3,4 @@ experiments/
 .env
 vlagent.py
 render.py
+__pycache__

@@ -67,6 +67,7 @@ class GenerateConfig:
     wandb_project: str = "YOUR_WANDB_PROJECT"
     wandb_entity: str = "YOUR_WANDB_ENTITY"
     seed: int = 7
+    flask: bool = True
 
 # Flask route to update instructions
 @app.route('/update_instruction', methods=['POST'])
@@ -86,6 +87,12 @@ def get_instruction():
     with instruction_lock:
         return jsonify({"status": "success", "instruction": instruction})
 
+@app.route('/get_waiting', methods=['GET'])
+def get_waiting():
+    global start
+    with instruction_lock:
+        return jsonify({"status": "success", "waiting": not start})
+
 # Flask route to get the latest frame
 @app.route('/get_latest_frame', methods=['GET'])
 def get_latest_frame():
@@ -94,8 +101,6 @@ def get_latest_frame():
         # Convert the frame to a JPEG image and send it as a response
         _, img_encoded = cv2.imencode('.jpg', latest_frame)
         return send_file(io.BytesIO(img_encoded.tobytes()), mimetype='image/jpeg')
-
-# HTML template
 
 @app.route('/')
 def index():
@@ -121,11 +126,12 @@ def video_feed():
 def start_flask_server():
     app.run(host='127.0.0.1', port=5000)
 
-def store_frame(obs, step):
+def store_frame(obs, step, done=False):
     global latest_frame
     global latest_wrist
     global first_frame
     global first_wrist
+    global done
     try:
         im = obs['agentview_image']
         im = cv2.rotate(im, cv2.ROTATE_180)
@@ -143,10 +149,11 @@ def store_frame(obs, step):
 @draccus.wrap()
 def main(cfg: GenerateConfig) -> None:
     # Initialization remains unchanged
-    server_thread = threading.Thread(target=start_flask_server, daemon=True)
-    server_thread.start()
+    if cfg.flask:
+        server_thread = threading.Thread(target=start_flask_server, daemon=True)
+        server_thread.start()
     cfg.task_suite_name = f"libero_{cfg.task}"
-    cfg.unnorm_key = f"libero_{cfg.model}" if cfg.model != 'base' else "bridge_orig"
+    cfg.unnorm_key = f"libero_{cfg.model}" if cfg.model is not None else f"libero_{cfg.task}"
     # Initialize LIBERO task suite
     benchmark_dict = benchmark.get_benchmark_dict()
     task_suite = benchmark_dict[cfg.task_suite_name]()
@@ -160,10 +167,8 @@ def main(cfg: GenerateConfig) -> None:
     
     if cfg.model == None:
         cfg.pretrained_checkpoint = f"openvla/openvla-7b-finetuned-libero-{cfg.task}"
-    elif cfg.model == "base":
-        cfg.pretrained_checkpoint = f"openvla/openvla-7b"
     else:
-        cfg.pretrained_checkpoint = f"openvla/openvla-7b-finetuned-libero-{cfg.task}"
+        cfg.pretrained_checkpoint = f"openvla/openvla-7b-finetuned-libero-{cfg.model}"
 
     assert cfg.pretrained_checkpoint is not None, "cfg.pretrained_checkpoint must not be None!"
     if "image_aug" in cfg.pretrained_checkpoint:
@@ -232,17 +237,16 @@ def main(cfg: GenerateConfig) -> None:
                     obs, reward, done, info = env.step(get_libero_dummy_action(cfg.model_family))
                     store_frame(obs, t)
                     if t == 0:
-                        print(obs.keys())
                         starting_state = env.get_sim_state()[1:10]
                     t += 1
                     continue
+                if cfg.flask:
+                    while True:
+                        with instruction_lock:
+                            if start:
+                                break
+                        time.sleep(0.2)
 
-                while True:
-                    with instruction_lock:
-                        if start:
-                            break
-                    time.sleep(0.2)
-                # Handle instructions
                 current_instruction = get_instruction()
                 if current_instruction == "reset":
                     curr_state = env.get_sim_state()
@@ -277,14 +281,12 @@ def main(cfg: GenerateConfig) -> None:
                 if done:
                     break
                 # Store the frame
-                store_frame(obs, t)
+                store_frame(obs, t, done)
 
                 t += 1
             except DeprecationWarning as e:
                 print(f"Error: {e}")
                 break
-
-        # After-task handling (unchanged)
 
 if __name__ == "__main__":
     main()
