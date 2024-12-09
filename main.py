@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, Response, render_template_string
+from flask import Flask, request, jsonify, send_file, Response, render_template
 import threading
 import os
 import sys
@@ -10,14 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 import io
+import json
 
 import draccus
 import numpy as np
 import tqdm
-from libero.libero import benchmark
 import wandb
 import pdb
 # Append current directory so that interpreter can find experiments.robot
+from libero.libero import benchmark
 sys.path.append("../..")
 from openvla.experiments.robot.libero.libero_utils import (
     get_libero_dummy_action,
@@ -40,15 +41,18 @@ from openvla.experiments.robot.robot_utils import (
 # Other imports remain unchanged
 
 app = Flask(__name__)
-instruction = "default"  # Default instruction
+instruction = "default"
+main_instruction = "default"
 instruction_lock = threading.Lock()
 latest_frame = np.zeros((224, 224, 3), dtype=np.uint8)
 latest_wrist = np.zeros((224, 224, 3), dtype=np.uint8)
 first_frame = np.zeros((224, 224, 3), dtype=np.uint8)
 first_wrist = np.zeros((224, 224, 3), dtype=np.uint8)
+current_message = None
+message_timestamp = 0
 
 frame_lock = threading.Lock()  # Lock to handle concurrent access to the frame
-start = False
+ep_status = 'Not started'
 
 @dataclass
 class GenerateConfig:
@@ -68,17 +72,35 @@ class GenerateConfig:
     wandb_entity: str = "YOUR_WANDB_ENTITY"
     seed: int = 7
     flask: bool = True
+    udi: int=1
+
+@app.route('/set_main_instruction', methods=['POST'])
+def set_main_instruction():
+    global main_instruction
+    data = request.get_json()
+    new_instruction = data.get("instruction", "")
+    with instruction_lock:
+        main_instruction = new_instruction
+    return jsonify({"status": "success", "new_instruction": new_instruction})
+
+@app.route('/get_main_instruction', methods=['GET'])
+def get_main_instruction():
+    global main_instruction
+    with instruction_lock:
+        return jsonify({"instruction": main_instruction})
 
 # Flask route to update instructions
 @app.route('/update_instruction', methods=['POST'])
 def update_instruction():
-    global instruction
-    global start
+    global instruction, ep_status, current_message
     data = request.get_json()
     new_instruction = data.get("instruction", "")
     with instruction_lock:
-        start = True
+        ep_status = "started"
         instruction = new_instruction
+        # Send the instruction as a message for the arrow animation
+        current_message = json.dumps({'type': 'send_instruction', 'message': new_instruction})
+        message_timestamp = time.time()
     return jsonify({"status": "success", "new_instruction": new_instruction})
 
 @app.route('/get_instruction', methods=['GET'])
@@ -87,11 +109,11 @@ def get_instruction():
     with instruction_lock:
         return jsonify({"status": "success", "instruction": instruction})
 
-@app.route('/get_waiting', methods=['GET'])
-def get_waiting():
-    global start
+@app.route('/get_status', methods=['GET'])
+def get_status():
+    global ep_status
     with instruction_lock:
-        return jsonify({"status": "success", "waiting": not start})
+        return jsonify({"status": "success", "status": ep_status})
 
 # Flask route to get the latest frame
 @app.route('/get_latest_frame', methods=['GET'])
@@ -104,45 +126,75 @@ def get_latest_frame():
 
 @app.route('/')
 def index():
-    html_template = open('html.txt', 'r').read()
-    return render_template_string(html_template), 200, {'Content-Type': 'text/html'}
-
+    return render_template('index.html'), 200
 
 @app.route('/video_feed')
 def video_feed():
     def generate(frame_type):
         while True:
-            time.sleep(0.3)
-            with frame_lock:
-                frame = latest_frame if frame_type == 'latest' else latest_wrist
+            frame = None
+            # Acquire lock only for frame copy
+            if frame_lock.acquire(timeout=0.5):
+                try:
+                    frame = latest_frame.copy() if frame_type == 'latest' else latest_wrist.copy()
+                finally:
+                    frame_lock.release()
+            
+            if frame is not None:
                 frame = cv2.resize(frame, (512, 512))  # Ensure frames are square
                 _, buffer = cv2.imencode('.jpg', frame)
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                      b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+            
+            time.sleep(0.3)  # Sleep after releasing the lock
 
     frame_type = request.args.get('frame_type', 'latest')
     return Response(generate(frame_type), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/send_feedback', methods=['POST'])
+def send_feedback():
+    global current_message
+    data = request.get_json()
+    feedback = data.get('feedback', '')
+    if feedback:
+        current_message = json.dumps({'type': 'send_feedback', 'message': feedback})
+        return jsonify({'status': 'success', 'message': feedback})
+    return jsonify({'status': 'error', 'message': 'No feedback provided'})
+
+@app.route('/stream')
+def stream():
+    def generate():
+        global current_message
+        while True:
+            if current_message:
+                yield f"data: {current_message}\n\n"
+                current_message = None  # Clear the message after sending
+            time.sleep(0.1)
+    
+    return Response(generate(), mimetype='text/event-stream')
 
 def start_flask_server():
     app.run(host='127.0.0.1', port=5000)
 
 def store_frame(obs, step, done=False):
-    global latest_frame
-    global latest_wrist
-    global first_frame
-    global first_wrist
-    global done
+    global latest_frame, latest_wrist, ep_status
     try:
-        im = obs['agentview_image']
+        im = cv2.cvtColor(obs['agentview_image'], cv2.COLOR_BGR2RGB)
         im = cv2.rotate(im, cv2.ROTATE_180)
-        im2 = obs['robot0_eye_in_hand_image']
+        im2 = cv2.cvtColor(obs['robot0_eye_in_hand_image'], cv2.COLOR_BGR2RGB)
         im2 = cv2.rotate(im2, cv2.ROTATE_180)
-        with frame_lock:
-            if step == 0:
-                first_frame = im
-                first_wrist = im2
-            latest_wrist = im2
-            latest_frame = im  # Store the most recent frame
+        
+        if frame_lock.acquire(timeout=0.5):
+            try:
+                latest_wrist = im2
+                latest_frame = im
+                if done:
+                    ep_status = "finished"
+            finally:
+                frame_lock.release()
+        else:
+            print("Failed to acquire lock for frame storage, skipping frame")
     except Exception as e:
         print(f"Failed to store frame: {e}")
 
@@ -152,6 +204,7 @@ def main(cfg: GenerateConfig) -> None:
     if cfg.flask:
         server_thread = threading.Thread(target=start_flask_server, daemon=True)
         server_thread.start()
+
     cfg.task_suite_name = f"libero_{cfg.task}"
     cfg.unnorm_key = f"libero_{cfg.model}" if cfg.model is not None else f"libero_{cfg.task}"
     # Initialize LIBERO task suite
@@ -217,10 +270,15 @@ def main(cfg: GenerateConfig) -> None:
         env, original_task = get_libero_env(task, cfg.model_family, resolution=512)
         print(f'Starting task {task_id}: {original_task}')
         global instruction
-        global start
+        global ep_status
+        global main_instruction
         with instruction_lock:
-            instruction = original_task
-            start = False
+            if cfg.udi:
+                instruction = original_task
+            else:
+                instruction = 'default'
+                main_instruction = 'default'
+            ep_status = "waiting"
         
         env.reset()
         obs = env.set_init_state(task_suite.get_task_init_states(task_id)[0])
@@ -240,10 +298,11 @@ def main(cfg: GenerateConfig) -> None:
                         starting_state = env.get_sim_state()[1:10]
                     t += 1
                     continue
+
                 if cfg.flask:
                     while True:
                         with instruction_lock:
-                            if start:
+                            if ep_status == "started":
                                 break
                         time.sleep(0.2)
 
@@ -254,6 +313,8 @@ def main(cfg: GenerateConfig) -> None:
                     env.set_state(curr_state)
                     action = np.array([0, 0, 0, 0, 0, 0, -1])
                     time.sleep(0.3)
+                    with instruction_lock:
+                        status = "waiting"
                 elif current_instruction == "stop":
                     time.sleep(0.3)
                     action = np.array([0, 0, 0, 0, 0, 0, -1])
