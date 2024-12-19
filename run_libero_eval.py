@@ -16,22 +16,28 @@ Usage:
         --wandb_project <PROJECT> \
         --wandb_entity <ENTITY>
 """
+
+
+
+
 import json
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
-
+from vlm import GeminiVLM
+from utils import *
 import draccus
 import numpy as np
 import tqdm
-from libero.libero import benchmark
-
+import ast
 import wandb
+import pdb
 
 # Append current directory so that interpreter can find experiments.robot
 sys.path.append("../..")
+from libero.libero import benchmark
 from openvla.experiments.robot.libero.libero_utils import (
     get_libero_dummy_action,
     get_libero_env,
@@ -70,7 +76,7 @@ class GenerateConfig:
     #################################################################################################################
     task_suite_name: str = "libero_spatial"          # Task suite. Options: libero_spatial, libero_object, libero_goal, libero_10, libero_90
     num_steps_wait: int = 10                         # Number of steps to wait for objects to stabilize in sim
-    num_trials_per_task: int = 4                    # Number of rollouts per task
+    num_trials_per_task: int = 2                    # Number of rollouts per task
 
     #################################################################################################################
     # Utils
@@ -89,8 +95,9 @@ class GenerateConfig:
 
 @draccus.wrap()
 def eval_libero(cfg: GenerateConfig) -> None:
+    vlm = GeminiVLM(model="gemini-1.5-pro")
     run_data = []
-    rephrased = json.load(open("r1.json"))
+    rephrased = json.load(open("json_stuff/r2.json"))
     assert cfg.pretrained_checkpoint is not None, "cfg.pretrained_checkpoint must not be None!"
     if "image_aug" in cfg.pretrained_checkpoint:
         assert cfg.center_crop, "Expecting `center_crop==True` because model was trained with image augmentations!"
@@ -159,23 +166,29 @@ def eval_libero(cfg: GenerateConfig) -> None:
 
         # Start episodes
         task_episodes, task_successes = 0, 0
-        for episode_idx in tqdm.tqdm(range(cfg.num_trials_per_task + 1)):
+        for episode_idx in tqdm.tqdm(range(cfg.num_trials_per_task*2)):
             print(f"\nTask: {task_description}")
-            if episode_idx == 0:
-                rephrased_instruction = task_description
-            else:
-                rephrased_instruction = rephrased[cfg.task_suite_name][task_description][episode_idx-1]
+            rephrased_instruction = rephrased[cfg.task_suite_name][task_description][episode_idx//2]
             log_file.write(f"\nTask: {task_description}\n --> {rephrased_instruction}\n")
             run_data.append({
                 "task_description": task_description,
                 "rephrased_instruction": rephrased_instruction,
                 "success": False,
             })
+            try:
+                st = cfg.task_suite_name.split('_')[-1]
+                prompt = make_icl_instructions(st, rephrased_instruction, examples=20)
+                out = vlm.call([], prompt)
+                dct = ast.literal_eval(out[out.rindex('{'):out.rindex('}') + 1])['rephrased_instruction']
+                rephrased_instruction = dct
+                run_data[-1]['llm_instruction'] = rephrased_instruction
+            except Exception as e:
+                print(e)
             # Reset environment
             env.reset()
 
             # Set initial states
-            obs = env.set_init_state(initial_states[episode_idx])
+            obs = env.set_init_state(initial_states[episode_idx%2])
 
             # Setup
             t = 0
@@ -252,9 +265,11 @@ def eval_libero(cfg: GenerateConfig) -> None:
             total_episodes += 1
 
             # Save a replay video of the episode
-            # save_rollout_video(
-            #     replay_images, total_episodes, success=done, task_description=task_description, log_file=log_file
-            # )
+
+            # if total_episodes <= 15:
+            #     save_rollout_video(
+            #         replay_images, total_episodes, success=done, task_description=task_description, log_file=log_file
+            #     )
 
             # Log current results
             print(f"Success: {done}")
@@ -265,7 +280,7 @@ def eval_libero(cfg: GenerateConfig) -> None:
             log_file.write(f"# successes: {total_successes} ({total_successes / total_episodes * 100:.1f}%)\n")
             log_file.flush()
             # Save run data
-            with open(f'{cfg.task_suite_name}_reprhase1.json', 'w') as f:
+            with open(f'{cfg.task_suite_name}_explore.json', 'w') as f:
                 log_file.write(f"Saving run data: {run_data}\n")
                 json.dump(run_data, f)
 

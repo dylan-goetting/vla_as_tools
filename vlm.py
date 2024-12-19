@@ -4,10 +4,7 @@ import torch
 import numpy as np
 import google.generativeai as genai
 import cv2
-
 from PIL import Image
-from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation, pipeline
-
 
 class VLM:
     """
@@ -150,6 +147,18 @@ class GeminiVLM(VLM):
         Reset the chat history.
         """
         self.session = self.model.start_chat(history=[])
+
+    def call_video(self, video_file, text_prompt):
+        try:
+            response = self.session.send_message([video_file, text_prompt])
+            self.spend += (response.usage_metadata.prompt_token_count * self.cost_per_input_token +
+                           response.usage_metadata.candidates_token_count * self.cost_per_output_token)
+
+        except Exception as e:  
+            logging.error(f"GEMINI API ERROR: {e}")
+            return "GEMINI API ERROR"
+
+        return response.text
 
     def call(self, images: list[np.array], text_prompt: str):
         """

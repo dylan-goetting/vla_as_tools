@@ -22,6 +22,8 @@ def make_icl_prompt(instruction):
     {instruction}
     Return them in the json {{1: <rephrase1>, 2: <rephrase2>}}
     """
+
+    
 data = {}
 
 tasks = json.load(open("tasks.json"))

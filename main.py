@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Union
 import io
 import json
-
+from collections import deque
 import draccus
 import numpy as np
 import tqdm
@@ -38,16 +38,14 @@ from openvla.experiments.robot.robot_utils import (
     normalize_gripper_action,
     set_seed_everywhere,
 )
-# Other imports remain unchanged
 
 app = Flask(__name__)
 instruction = "default"
 main_instruction = "default"
 instruction_lock = threading.Lock()
-latest_frame = np.zeros((224, 224, 3), dtype=np.uint8)
-latest_wrist = np.zeros((224, 224, 3), dtype=np.uint8)
-first_frame = np.zeros((224, 224, 3), dtype=np.uint8)
-first_wrist = np.zeros((224, 224, 3), dtype=np.uint8)
+message_lock = threading.Lock()
+latest_frame = np.zeros((256, 256, 3), dtype=np.uint8)
+latest_wrist = np.zeros((256, 256, 3), dtype=np.uint8)
 current_message = None
 message_timestamp = 0
 
@@ -98,9 +96,9 @@ def update_instruction():
     with instruction_lock:
         ep_status = "started"
         instruction = new_instruction
-        # Send the instruction as a message for the arrow animation
+
+    with message_lock:
         current_message = json.dumps({'type': 'send_instruction', 'message': new_instruction})
-        message_timestamp = time.time()
     return jsonify({"status": "success", "new_instruction": new_instruction})
 
 @app.route('/get_instruction', methods=['GET'])
@@ -129,11 +127,9 @@ def index():
     return render_template('index.html'), 200
 
 @app.route('/video_feed')
-def video_feed():
-    def generate(frame_type):
+def video_feed():    
+    def generate(frame_type):        
         while True:
-            frame = None
-            # Acquire lock only for frame copy
             if frame_lock.acquire(timeout=0.5):
                 try:
                     frame = latest_frame.copy() if frame_type == 'latest' else latest_wrist.copy()
@@ -141,12 +137,11 @@ def video_feed():
                     frame_lock.release()
             
             if frame is not None:
-                frame = cv2.resize(frame, (512, 512))  # Ensure frames are square
                 _, buffer = cv2.imencode('.jpg', frame)
                 yield (b'--frame\r\n'
-                      b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
             
-            time.sleep(0.3)  # Sleep after releasing the lock
+            time.sleep(0.3)
 
     frame_type = request.args.get('frame_type', 'latest')
     return Response(generate(frame_type), mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -157,20 +152,19 @@ def send_feedback():
     global current_message
     data = request.get_json()
     feedback = data.get('feedback', '')
-    if feedback:
+    with message_lock:
         current_message = json.dumps({'type': 'send_feedback', 'message': feedback})
-        return jsonify({'status': 'success', 'message': feedback})
-    return jsonify({'status': 'error', 'message': 'No feedback provided'})
+    return jsonify({'status': 'success', 'message': feedback})
 
 @app.route('/stream')
 def stream():
     def generate():
         global current_message
         while True:
-            if current_message:
-                yield f"data: {current_message}\n\n"
-                current_message = None  # Clear the message after sending
-            time.sleep(0.1)
+            with message_lock:
+                if current_message:
+                    yield f"data: {current_message}\n\n"
+            time.sleep(0.3)
     
     return Response(generate(), mimetype='text/event-stream')
 
@@ -204,7 +198,6 @@ def main(cfg: GenerateConfig) -> None:
     if cfg.flask:
         server_thread = threading.Thread(target=start_flask_server, daemon=True)
         server_thread.start()
-
     cfg.task_suite_name = f"libero_{cfg.task}"
     cfg.unnorm_key = f"libero_{cfg.model}" if cfg.model is not None else f"libero_{cfg.task}"
     # Initialize LIBERO task suite
@@ -274,7 +267,7 @@ def main(cfg: GenerateConfig) -> None:
         global main_instruction
         with instruction_lock:
             if cfg.udi:
-                instruction = original_task
+                main_instruction = original_task
             else:
                 instruction = 'default'
                 main_instruction = 'default'
@@ -294,10 +287,10 @@ def main(cfg: GenerateConfig) -> None:
                 if t < cfg.num_steps_wait:
                     obs, reward, done, info = env.step(get_libero_dummy_action(cfg.model_family))
                     store_frame(obs, t)
-                    if t == 0:
-                        starting_state = env.get_sim_state()[1:10]
                     t += 1
                     continue
+                if t == cfg.num_steps_wait:
+                    starting_state = env.get_sim_state()
 
                 if cfg.flask:
                     while True:
@@ -307,14 +300,22 @@ def main(cfg: GenerateConfig) -> None:
                         time.sleep(0.2)
 
                 current_instruction = get_instruction()
-                if current_instruction == "reset":
+
+                if current_instruction == 'reset hard':
+                    env.set_state(starting_state)
+                    action = np.array([0, 0, 0, 0, 0, 0, -1])
+                    time.sleep(0.3)
+                    with instruction_lock:
+                        ep_status = "waiting"   
+
+                elif current_instruction == "reset":
                     curr_state = env.get_sim_state()
-                    curr_state[1:10] = starting_state
+                    curr_state[1:10] = starting_state[1:10]
                     env.set_state(curr_state)
                     action = np.array([0, 0, 0, 0, 0, 0, -1])
                     time.sleep(0.3)
                     with instruction_lock:
-                        status = "waiting"
+                        ep_status = "resetting"
                 elif current_instruction == "stop":
                     time.sleep(0.3)
                     action = np.array([0, 0, 0, 0, 0, 0, -1])

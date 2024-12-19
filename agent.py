@@ -97,11 +97,12 @@ def upload_video(filepath, cache=True):
     return video_file
 
 def make_prompt(inst):
-    return """The robot was given the task of {inst}. Carefully analyze this video, 
+    return f"""The robot was given the task of {inst}. Carefully analyze this video, 
     and evaulate the current status of the robot's task. First tell me the objects of 
     interest given the instruction, then tell me what the robot does in this video. 
     Then decide whether the robot has succeeded, failed or is still working on it. 
-    Return a json in the form {{'status': <complete, fail, ok>}}"""
+    Return a json in the form {{'status': <success, fail, ok>}}"""
+
 
 
 def make_icl_video_prompt():
@@ -123,12 +124,12 @@ def make_icl_video_prompt():
     fourth_resp = "The main object is the plate. I see the robot is touching the plate the whole time and sliding it over. It looses its grip at the end but it looks like it is still attempting to recover {'status': 'ok'}"
 
     return [
-    {
-        "role": "user",
-        "parts": [
-        video_file1, make_prompt(instruction1),
-        ],
-    },
+    # {
+    #     "role": "user",
+    #     "parts": [
+    #     video_file1, make_prompt(instruction1),
+    #     ],
+    # },
     {
         "role": "model",
         "parts": [
@@ -165,21 +166,22 @@ def make_icl_video_prompt():
         video_file4, make_prompt(instruction4),
         ],
     },
-    {
-        "role": "model",
-        "parts": [
-        fourth_resp,
-        ],
-    },
+    # {
+    #     "role": "model",
+    #     "parts": [
+    #     fourth_resp,
+    #     ],
+    # },
     ]
     
 
 class Feedback():
 
-    def __init__(self, model, buffer_len=120):
+    def __init__(self, model, buffer_len=130):
         self.vlm = GeminiVLM(model=model, system_instruction="You are an assistant whose purpose is to watch a video of a robot as it attempts to perform a task, and determine whether the robot has succeeded, failed, or is still in progress. Note that for tasks like placing objects somewhere, if it looks like the robot is ABOUT to place the object in the right location, it should count as a success. You should only return 'fail' when it is clear the robot has stalled and is not moving at all OR if it is moving nonsensically.")
         self.frames = deque(maxlen=buffer_len)
         self.icl = make_icl_video_prompt()
+
         self.running = True  # To control the frame update thread
         self.lock = threading.Lock()  # Ensure thread safety when resetting frames
 
@@ -211,7 +213,7 @@ class Feedback():
         print("Frame buffer has been reset.")
 
     def get_feedback(self, instruction):
-        # Returns complete, fail, or ok
+        # Returns success, fail, or ok
         print("Starting feedback process")
         t = time.time()
         with self.lock:
@@ -221,7 +223,7 @@ class Feedback():
             self.vlm.reset()
             path = self.save_rollout_video(frames_snapshot)
             self.vlm.session.history = self.icl
-            prompt = f"The robot was given the task of {instruction}. Carefully analyze this video, and evaluate the current status of the robot's task. First tell me the objects of interest given the instruction, then tell me what the robot does in this video, and lastly return a json in the form {{'status': <complete, fail, ok>}}"
+            prompt = f"The robot was given the task of {instruction}. Carefully analyze this video, and evaluate the current status of the robot's task. First tell me the objects of interest given the instruction, then tell me what the robot does in this video, and lastly return a json in the form {{'status': <success, fail, ok>}}"
             video_file = upload_video(path, cache=False)
             response = self.vlm.call_video(video_file, prompt)
             eval_resp = ast.literal_eval(response[response.rindex("{"):response.rindex("}") + 1])
@@ -258,29 +260,33 @@ class Agent():
 
     def generate_instruction(self, starting=False, update=None):
         if starting:
-            prompt = f"""
-            The human is giving you the following (broad) instruction: {self.starting_instruction}. Based on this instruction, and the image you see of the scene.
-            please generate a sub-instruction for the robot to execute. From your past experience with this robot, you have collected the following data about which 
-            instructions the robot is able to successfully execute, and which ones it is not: {make_icl_instructions("", "", plain=True)}
-            Think about the characteristics of the instructions, and any patterns you might see between success cases and failure cases.
-            Return the command in the json {{'command': <command>}}
-            """
+            prompt = (
+                f"The human is giving you the following (broad) instruction: {self.starting_instruction}. "
+                f"Based on this instruction and the image of the scene, generate a sub-instruction for the robot to execute, which can be just part of the original instruction if the original instruction is complex. "
+                f"From your past experience with this robot, you have collected the following data about successful and unsuccessful instructions: "
+                f"{make_icl_instructions('', '', plain=True)}\n"
+                f"Analyze the characteristics and patterns of successful and failed instructions. "
+                f"Briefly explain your reasoning and then return the command in JSON format: {{\"command\": <command>}}"
+            )
         else:
             assert update is not None
             prev_instruction = update['instruction']
             outcome = update['outcome']
-            prompt = f"""
-            As a reminder, your ultimate goal is to get the robot to complete the following (broad) instruction: {self.starting_instruction}. 
-            You just recieved feedback that the robot {'successfully completed the' if outcome == 'success' else 'failed to complete the'} previous command {prev_instruction}'.
-            Use this information as well as the image of the scene, and your past experience with the robot to briefly reflect on how your commands have performed so far, and plan what you should do next to make progress towards your end goal. Return the 
-            command in the json {{'command': <command>}}
-            """
+            prompt = (
+                f"As a reminder, your ultimate goal is to get the robot to complete the following (broad) instruction: {self.starting_instruction}. "
+                f"You just recieved feedback that the robot {'successfully completed the' if outcome == 'success' else 'failed to complete the'} previous command {prev_instruction}'."
+                f"Use this information as well as the image of the scene, and your past experience with the robot to briefly reflect on how your commands have performed so far, and plan what you should do next to make progress towards your end goal. "
+                f"Briefly explain your thinking and then return the command in the json {{'command': <command>}}"
+            )
+
         for attempt in range(4):
             try:
-                response = self.vlm.call_chat(1000, [get_latest_frame()], prompt)
+                frame = get_latest_frame()
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                response = self.vlm.call_chat(1000, [frame], prompt)
                 instruction = ast.literal_eval(response[response.rindex("{"):response.rindex("}") + 1])['command']
-                print(f'Prompt: {prompt}')
                 print(f'Response: {response}')
+                response = response[0: response.rindex("{")]
                 break
             except Exception as e:
                 if attempt == 3:
@@ -288,7 +294,7 @@ class Agent():
                 print(f"Attempt {attempt + 1} failed. Retrying...")
 
         
-        return instruction        
+        return response, instruction        
 
     def run_episode(self):
         feedback = Feedback('gemini-1.5-flash')
@@ -297,16 +303,16 @@ class Agent():
             if instruction is not None and instruction != 'default':
                 print(f"Received starting instruction: {instruction}")
                 self.starting_instruction = instruction
-                instruction = self.generate_instruction(starting=True)
-                send_instruction(instruction)
+                response, instruction = self.generate_instruction(starting=True)
+                send_instruction(instruction) 
                 break
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         feedback.start()
+
+
         t = time.time()
-        last_feedback = t - 2
-
-
+        last_feedback = t - 4
         while True: 
             time.sleep(0.3)
             dt = time.time()
@@ -316,27 +322,32 @@ class Agent():
                     return
                 l = len(feedback.frames)
 
-            if (dt - last_feedback) > 12 and l > 70:
+            if (dt - last_feedback) > 13 and l > 120:
                 last_feedback = time.time()
+                send_feedback('Starting feedback calculation')
                 status = feedback.get_feedback(instruction)
                 with feedback.lock:
                     if not feedback.running:
                         return
                 send_feedback(status)
                 if status != 'ok':
+                    time.sleep(0.3)
                     send_instruction("reset")
-                    feedback.reset()
-                    time.sleep(0.2)
-                    new_instruction = self.generate_instruction(starting=False, update= {"instruction": instruction, "outcome": status})
+                    time.sleep(1)
+                    response, new_instruction = self.generate_instruction(starting=False, update= {"instruction": instruction, "outcome": status})
                     with feedback.lock:
                         if not feedback.running:
                             return
                     send_instruction(new_instruction)
+                    time.sleep(0.5)
+                    send_feedback(' ')
+                    instruction = new_instruction
+                    feedback.reset()
 
     def run(self):
         while True:
             self.run_episode()
-
+            self.vlm.reset()
             
 if __name__ == "__main__":
     agent = Agent("gemini-1.5-pro")

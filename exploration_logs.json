@@ -1,0 +1,162 @@
+[
+    {
+        "instruction": "Pick up the ramekin.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Grasp the silver bowl on the square.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Move the plate to the left.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Please place the cookies next to the ramekin.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Carefully lift the second silver bowl.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Rotate the bowl on the square 90 degrees.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Open the drawer.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Transfer the cookies to the plate.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Could you position the second silver bowl on top of the square?",
+        "outcome": 0
+    },
+    {
+        "instruction": "Examine the ramekin closely.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Release the plate.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Gently place the cube in the bowl.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Move the plate to the top of the dark box.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Pick up the bowl.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Rotate the cube 90 degrees.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Stack the two bowls.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Move 5 cm forward.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Lift the plate 10 cm above the table.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Please grasp the handle of the drawer.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Carefully position the plate next to the bowl.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Pick up the smaller bowl.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Grasp the baking dish.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Please move the plate to the left.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Could you put the cookies on top of the burner?",
+        "outcome": 0
+    },
+    {
+        "instruction": "Open the top drawer of the cabinet.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Carefully place the larger bowl inside the smaller bowl.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Rotate the burner 90 degrees clockwise.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Transfer the cookies to the plate.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Move the plate next to the baking dish.",
+        "outcome": 1
+    },
+    {
+        "instruction": "Place the bag of cookies in the top drawer, then close the drawer",
+        "outcome": 0
+    },
+    {
+        "instruction": "Pick up the bowl.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Grasp the small blue cube.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Move the blue cube to the plate.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Place the block on the burner.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Please carefully place the blue cube into the empty bowl.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Rotate the block 90 degrees clockwise.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Open the cabinet.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Move to the left by 10 cm.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Lift the blue block 5 inches higher.",
+        "outcome": 0
+    },
+    {
+        "instruction": "Stack the bowls",
+        "outcome": 0
+    }
+]

@@ -53,13 +53,13 @@
         .video-container {
             position: absolute;
             top: 100px;
-            left: 10px;
+            left: -2px;
             transform: none;
             display: flex;
             gap: 20px;
-            background-color: #ece0e0;
+            background-color: #d0d0d0;
             padding: 20px;
-            border-radius: 8px;
+            border-radius: 5px;
             border: 2px solid black;
         }
         .stream {
@@ -86,7 +86,7 @@
             transform: translateX(-50%);
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 50px;
             width: 100%;
             max-width: 600px;
             text-align: center;
@@ -103,7 +103,7 @@
         .arrow path {
             fill: none;
             stroke: #000;
-            stroke-width: 2;
+            stroke-width: 4;
         }
         .arrow-text {
             position: absolute;
@@ -174,34 +174,30 @@
         </div>
 
         <div class="input-container">
-            <input type="text" id="instructionInput" placeholder="Send instruction">
             <input type="text" id="mainInstructionInput" placeholder="Set main instruction">
+            <input type="text" id="instructionInput" placeholder="Send instruction">
         </div>
     </div>
 
     <script>
         // Function to show arrow and text with timeout
         function showArrowAndText(arrowId, textId, message) {
-            const arrow = document.getElementById(arrowId);
-            const textElement = document.getElementById(textId);
-            
-            // Get the path element
-            const path = arrow.querySelector('path');
-            const pathLength = path.getTotalLength();
-            
-            // Calculate position along the path
-            const point = path.getPointAtLength(pathLength * 0.5); // Position text at middle of path
-            
-            textElement.textContent = message;
-            textElement.style.display = 'block';
-            textElement.style.left = `${point.x - textElement.offsetWidth/2}px`;
-            textElement.style.top = `${point.y - textElement.offsetHeight/2}px`;
-            
-            // Hide after 10 seconds
-            setTimeout(() => {
-                arrow.style.display = 'none';
-                textElement.style.display = 'none';
-            }, 10000);
+            if (message) {
+                const arrow = document.getElementById(arrowId);
+                const textElement = document.getElementById(textId);
+                
+                // Get the path element
+                const path = arrow.querySelector('path');
+                const pathLength = path.getTotalLength();
+                
+                // Calculate position along the path
+                const point = path.getPointAtLength(pathLength * 0.5); // Position text at middle of path
+                
+                textElement.textContent = message;
+                textElement.style.display = 'block';
+                textElement.style.left = `${point.x - textElement.offsetWidth/2}px`;
+                textElement.style.top = `${point.y - textElement.offsetHeight/2}px`;
+            }
         }
 
         // Add event listeners for input fields
